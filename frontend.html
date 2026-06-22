@@ -51,6 +51,7 @@
             margin-top: 10px;
         }
         .error { color: red; font-size: 0.9em; margin-bottom: 10px; }
+        .success-banner { color: #28a745; font-size: 0.95em; margin-bottom: 10px; font-weight: bold; text-align: center; }
         
         /* Chat Specific Styles */
         .header { display: flex; justify-content: space-between; align-items: center; }
@@ -96,6 +97,19 @@
             margin-top: 10px;
         }
         .send-area input { flex-grow: 1; }
+
+        /* My ID Badge Style */
+        .my-id-badge {
+            font-size: 0.5em;
+            color: #495057;
+            background: #e9ecef;
+            padding: 4px 10px;
+            border-radius: 20px;
+            margin-left: 10px;
+            font-weight: normal;
+            vertical-align: middle;
+            border: 1px solid #ced4da;
+        }
     </style>
 </head>
 <body>
@@ -116,9 +130,10 @@
 
     <div id="chat-section" style="display: none;">
         <div class="header">
-            <h2>Real-Time Chat</h2>
+            <h2>Real-Time Chat<span id="my-id-display" class="my-id-badge" style="display: none;"></span></h2>
             <button onclick="logout()" style="background-color: #dc3545;">Logout</button>
         </div>
+        <div id="registration-success" class="success-banner"></div>
         <div id="chat-error" class="error"></div>
         
         <div class="form-group" style="flex-direction: row;">
@@ -141,7 +156,7 @@
 
 <script>
     const BASE_URL = 'http://localhost:8000'; 
-    const WS_URL = 'ws://localhost:8000'; // Change to wss:// if using HTTPS in production
+    const WS_URL = 'ws://localhost:8000'; 
     
     let isLoginMode = true;
     let token = localStorage.getItem('chat_token');
@@ -160,6 +175,8 @@
     const chatBox = document.getElementById('chat-box');
     const messageInput = document.getElementById('message-input');
     const contactInput = document.getElementById('contact-id');
+    const myIdDisplay = document.getElementById('my-id-display');
+    const registrationSuccess = document.getElementById('registration-success');
 
     // Utility: Decode JWT token to get our own user ID
     function getUserIdFromToken(token) {
@@ -191,10 +208,12 @@
     authForm.addEventListener('submit', async (e) => {
         e.preventDefault();
         authError.textContent = '';
+        registrationSuccess.textContent = '';
         const username = document.getElementById('username').value;
         const password = document.getElementById('password').value;
 
         try {
+            let registeredId = null;
             if (!isLoginMode) {
                 const regRes = await fetch(`${BASE_URL}/auth/register`, {
                     method: 'POST',
@@ -202,6 +221,10 @@
                     body: JSON.stringify({ username, password })
                 });
                 if (!regRes.ok) throw new Error('Registration failed. Username might be taken.');
+                
+                // Parse response structure containing the ID from UserResponse
+                const regData = await regRes.json();
+                registeredId = regData.id;
             }
 
             const params = new URLSearchParams();
@@ -224,14 +247,18 @@
             showChat();
             connectWebSocket();
 
+            // Display success message containing the user ID if registration just completed
+            if (registeredId !== null) {
+                registrationSuccess.textContent = `🎉 Registration successful! Your User ID is ${registeredId}`;
+            }
+
         } catch (err) {
             authError.textContent = err.message;
         }
     });
 
-    // --- NEW: WebSocket Integration ---
     function connectWebSocket() {
-        if (ws) ws.close(); // Close existing connection if any
+        if (ws) ws.close(); 
         
         ws = new WebSocket(`${WS_URL}/ws?token=${token}`);
 
@@ -241,9 +268,7 @@
             const newMsg = JSON.parse(event.data);
             const activeContactId = parseInt(contactInput.value);
             
-            // Only display if the message belongs to the currently open chat
             if (newMsg.sender_id === activeContactId || newMsg.receiver_id === activeContactId) {
-                // If the chatbox currently shows "No messages" or "Loading", clear it
                 if (chatBox.innerHTML.includes('text-align: center')) {
                     chatBox.innerHTML = '';
                 }
@@ -255,7 +280,6 @@
         ws.onerror = (err) => console.error("WebSocket Error:", err);
     }
 
-    // --- NEW: Send Message via WebSocket ---
     function sendMessage() {
         const content = messageInput.value.trim();
         const contactId = contactInput.value;
@@ -272,24 +296,21 @@
 
         chatError.textContent = '';
 
-        // Payload matches what your FastAPI expects: data.get("receiver_id") & data.get("message")
         const payload = {
             receiver_id: parseInt(contactId),
             message: content
         };
 
         ws.send(JSON.stringify(payload));
-        messageInput.value = ''; // Clear input field
+        messageInput.value = ''; 
     }
 
-    // Allow sending message with 'Enter' key
     function handleKeyPress(event) {
         if (event.key === 'Enter') {
             sendMessage();
         }
     }
 
-    // Fetch Chat History
     async function fetchChatHistory() {
         const contactId = contactInput.value;
         if (!contactId) return;
@@ -327,11 +348,8 @@
         }
     }
 
-    // Render a single message to the DOM
     function appendMessage(msg) {
         const div = document.createElement('div');
-        
-        // Correctly identify if we sent it by checking against our JWT user ID
         const isSent = (msg.sender_id === myUserId); 
         
         div.className = `message ${isSent ? 'sent' : 'received'}`;
@@ -347,7 +365,6 @@
         div.appendChild(time);
         chatBox.appendChild(div);
 
-        // Auto-scroll to bottom
         chatBox.scrollTop = chatBox.scrollHeight;
     }
 
@@ -355,6 +372,12 @@
     function showChat() {
         authSection.style.display = 'none';
         chatSection.style.display = 'block';
+
+        // Update the badge with the current user ID
+        if (myUserId) {
+            myIdDisplay.textContent = `Your ID: ${myUserId}`;
+            myIdDisplay.style.display = 'inline-block';
+        }
     }
 
     function logout() {
@@ -367,6 +390,9 @@
         authForm.reset();
         messageInput.value = '';
         contactInput.value = '';
+        chatError.textContent = '';
+        registrationSuccess.textContent = '';
+        myIdDisplay.style.display = 'none';
         chatBox.innerHTML = '<p style="text-align: center; color: #888;">Enter a contact ID to view history.</p>';
     }
 </script>
